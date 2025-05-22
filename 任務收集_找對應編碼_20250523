@@ -1,0 +1,163 @@
+Function GetHeaderDict(ws As Worksheet, headerRow As Long) As Object
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    Dim col As Long, lastCol As Long
+    lastCol = ws.Cells(headerRow, ws.Columns.Count).End(xlToLeft).Column
+    For col = 1 To lastCol
+        If ws.Cells(headerRow, col).Value <> "" Then
+            dict(Trim(ws.Cells(headerRow, col).Value)) = col
+        End If
+    Next col
+    Set GetHeaderDict = dict
+End Function
+Function GetNextSerial() As Long
+    On Error Resume Next
+    Dim val As Variant
+    val = ThisWorkbook.Names("編碼序號").RefersTo
+    If Err.number <> 0 Or val = "" Then
+        GetNextSerial = 1
+    Else
+        val = Replace(val, "=", "")
+        GetNextSerial = CLng(val)
+    End If
+    On Error GoTo 0
+End Function
+
+Sub SetNextSerial(newValue As Long)
+    On Error Resume Next
+    ' 如果已存在則刪除
+    ThisWorkbook.Names("編碼序號").Delete
+    ThisWorkbook.Names.Add Name:="編碼序號", RefersTo:="=" & newValue
+    On Error GoTo 0
+End Sub
+
+Function 找對應編碼(ws As Worksheet, keyColName As String, valColName As String, keyVal As String) As String 'ws參數, "單位", "單位編號", 單位名稱
+    Dim dictHeader As Object: Set dictHeader = GetHeaderDict(ws, 1)
+    Dim row As Long, lastRow As Long
+    Dim keyCol As Long, valCol As Long
+
+    If Not dictHeader.exists(keyColName) Or Not dictHeader.exists(valColName) Then Exit Function
+
+    keyCol = dictHeader(keyColName) '單位
+    valCol = dictHeader(valColName) '單位編號
+    lastRow = ws.Cells(ws.Rows.Count, keyCol).End(xlUp).row
+
+    For row = 2 To lastRow
+        If Trim(ws.Cells(row, keyCol).Value) = keyVal Then
+            找對應編碼 = Trim(ws.Cells(row, valCol).Value)
+            Exit Function
+        End If
+    Next row
+End Function
+Function 產生內部編碼(wsData As Worksheet, row As Long, ws參數 As Worksheet, 編碼版本 As String) As String
+    Dim dictHeader As Object: Set dictHeader = GetHeaderDict(wsData, 2)
+    Dim 單位碼 As String, 設備碼 As String, 種類碼 As String, 產品階段碼 As String
+    Dim 單位編號 As String, 設備類型編號 As String
+
+    On Error GoTo 錯誤處理
+
+    單位碼 = Trim(wsData.Cells(row, dictHeader("委託單位")).Value)
+    設備碼 = Trim(wsData.Cells(row, dictHeader("設備類型")).Value)
+    種類碼 = Trim(wsData.Cells(row, dictHeader("種類")).Value)
+    產品階段碼 = Trim(wsData.Cells(row, dictHeader("產品階段")).Value)
+
+    單位編號 = 找對應編碼(ws參數, "單位", "單位編碼", 單位碼)
+    設備類型編號 = 找對應編碼(ws參數, "設備類型", "設備編碼", 設備碼)
+    種類編號 = 找對應編碼(ws參數, "種類", "種類編碼", 種類碼)
+    產品階段編號 = 找對應編碼(ws參數, "產品階段", "產品階段編碼", 產品階段碼)
+    
+    If 單位編號 = "" Or 設備類型編號 = "" Or 種類編號 = "" Or 產品階段編號 = "" Then
+        If 單位編號 = "" Then
+            MsgBox "單位編號 未填"
+            
+        ElseIf 設備類型編號 = "" Then
+            MsgBox "設備類型編號 未填"
+            
+        ElseIf 種類編號 = "" Then
+            MsgBox "種類編號 未填"
+            
+        ElseIf 產品階段編號 = "" Then
+            MsgBox "產品階段編號 未填"
+            
+        End If
+        產生內部編碼 = ""
+        
+    Else
+        產生內部編碼 = 編碼版本 & 單位編號 & 設備類型編號 & 種類編號 & 產品階段編號
+    End If
+    Exit Function
+
+錯誤處理:
+    MsgBox "錯誤1"
+End Function
+Sub 補齊或轉換正式編碼()
+    Const 固定編碼版本 As String = "A"
+
+    Dim wsData As Worksheet: Set wsData = ActiveSheet
+    Dim ws參數 As Worksheet: Set ws參數 = ThisWorkbook.Sheets("參數列表")
+    Dim dictHeader As Object: Set dictHeader = GetHeaderDict(wsData, 2)
+
+    Dim row As Long, lastRow As Long
+    Dim 編碼欄 As Long, 產品名稱 As String, 需求日 As String
+    Dim 內部編碼 As String, 正式編碼 As String
+    Dim 原始編碼 As String
+    Dim 序號 As Long: 序號 = Application.Max(1, GetNextSerial())
+
+    If Not dictHeader.exists("編碼") Then
+        MsgBox "找不到『編碼』欄位", vbExclamation: Exit Sub
+    End If
+    編碼欄 = dictHeader("編碼")
+    lastRow = wsData.Cells(wsData.Rows.Count, 1).End(xlUp).row
+
+    For row = 3 To lastRow
+        原始編碼 = Trim(wsData.Cells(row, 編碼欄).Value)
+
+        ' === 判斷是否為「正式編碼」，若是則跳過 ===
+        Dim parts() As String
+        parts = Split(原始編碼, "-")
+        If UBound(parts) = 3 Then
+            If Left(parts(1), 1) = 固定編碼版本 And Len(parts(3)) = 4 Then
+                ' 正式格式，跳過
+                GoTo NextRow
+            End If
+        End If
+
+        ' === 空白欄位處理 ===
+        If 原始編碼 = "" Then
+            產品名稱 = IIf(dictHeader.exists("產品名稱"), Trim(wsData.Cells(row, dictHeader("產品名稱")).Value), "未指定")
+            If dictHeader.exists("需求日") And IsDate(wsData.Cells(row, dictHeader("需求日")).Value) Then
+                需求日 = Format(wsData.Cells(row, dictHeader("需求日")).Value, "yyyymmdd")
+            Else
+                需求日 = "未指定"
+            End If
+            內部編碼 = 產生內部編碼(wsData, row, ws參數, 固定編碼版本)
+
+            If 內部編碼 <> "" Then
+                正式編碼 = 產品名稱 & "-" & 內部編碼 & "-" & 需求日 & "-" & Format(Hex(序號), "0000")
+                wsData.Cells(row, 編碼欄).Value = 正式編碼
+                Debug.Print "空白轉換：第 " & row & " → " & 正式編碼
+                序號 = 序號 + 1
+            End If
+
+        ' === 暫時編碼處理（如 BG66-20250521213455） ===
+        ElseIf UBound(parts) = 1 And Len(parts(1)) = 14 And IsNumeric(parts(1)) Then
+            產品名稱 = parts(0)
+            If dictHeader.exists("需求日") And IsDate(wsData.Cells(row, dictHeader("需求日")).Value) Then
+                需求日 = Format(wsData.Cells(row, dictHeader("需求日")).Value, "yyyymmdd")
+            Else
+                需求日 = "未指定"
+            End If
+            內部編碼 = 產生內部編碼(wsData, row, ws參數, 固定編碼版本)
+            If 內部編碼 <> "" Then
+                正式編碼 = 產品名稱 & "-" & 內部編碼 & "-" & 需求日 & "-" & Format(Hex(序號), "0000")
+                wsData.Cells(row, 編碼欄).Value = 正式編碼
+                Debug.Print "暫時轉換：第 " & row & " → " & 正式編碼
+                序號 = 序號 + 1
+            End If
+        End If
+
+NextRow:
+    Next row
+
+    SetNextSerial 序號
+    MsgBox "已完成正式編碼轉換與補齊", vbInformation
+End Sub
