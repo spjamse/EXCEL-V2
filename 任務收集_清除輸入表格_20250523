@@ -1,0 +1,29 @@
+Sub 清除輸入表格()
+    Dim inputdata As Worksheet
+    Set inputdata = ThisWorkbook.Sheets("輸入區")
+
+    ' 清除各個欄位的內容
+With inputdata
+    .Range("B2").ClearContents
+    .Range("D2").ClearContents
+    .Range("B3").ClearContents
+    .Range("B4").MergeArea.ClearContents
+    .Range("D4").ClearContents
+    .Range("F4").ClearContents
+    .Range("D5").ClearContents
+    .Range("F5").ClearContents
+    .Range("B6").ClearContents
+    .Range("D6").ClearContents
+    .Range("F6").ClearContents
+    .Range("B7").ClearContents
+    .Range("B8").ClearContents
+    .Range("B9").ClearContents
+    .Range("D9").ClearContents
+    .Range("F9").ClearContents
+    .Range("B10").ClearContents
+    .Range("B11").ClearContents
+    .Range("B12").MergeArea.ClearContents
+End With
+    
+    MsgBox "已清除輸入表格！", vbInformation
+End Sub
