@@ -1,0 +1,174 @@
+Function GetHeaderDict(ws As Worksheet, headerRow As Long) As Object
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    Dim col As Long, lastCol As Long
+    lastCol = ws.Cells(headerRow, ws.Columns.Count).End(xlToLeft).Column
+    For col = 1 To lastCol
+        If ws.Cells(headerRow, col).Value <> "" Then
+            dict(Trim(ws.Cells(headerRow, col).Value)) = col
+        End If
+    Next col
+    Set GetHeaderDict = dict
+End Function
+
+Function GetOrOpenWorkbook(nameOnly As String, fullPath As String) As Workbook
+    On Error Resume Next
+    Set GetOrOpenWorkbook = Workbooks(nameOnly & "_委託任務.xlsm")
+    If GetOrOpenWorkbook Is Nothing Then
+        Set GetOrOpenWorkbook = Workbooks.Open(fullPath)
+    End If
+    On Error GoTo 0
+End Function
+
+Function FindByCode1(ws As Worksheet, codeCol As String, code As String) As Range
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, codeCol).End(xlUp).Row
+    Set FindByCode1 = ws.Range(codeCol & "2:" & codeCol & lastRow).Find( _
+        What:=Trim(code), LookIn:=xlValues, LookAt:=xlWhole)
+End Function
+
+Function IsFileLocked(ByVal filePath As String) As Boolean
+    Dim f As Integer
+    f = FreeFile
+    On Error Resume Next
+    Open filePath For Binary Access Read Write Lock Read Write As #f
+    If Err.Number <> 0 Then
+        IsFileLocked = True
+        Err.Clear
+    Else
+        IsFileLocked = False
+        Close #f
+    End If
+    On Error GoTo 0
+End Function
+Sub 匯出任務至工程師檔案_使用總資料完整資訊_V4_2_4()
+    Dim wsSrc As Worksheet, wsDone As Worksheet, wsTotal As Worksheet, midWS As Worksheet
+    Dim wbMid As Workbook, wbEng As Workbook
+    Dim dictSrc As Object, dictTotal As Object, dictMid As Object, dictEng As Object
+    Dim taskMap As Object, skippedEngineers As Object
+    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim lastRow As Long, i As Long, engName As String, taskCode As String
+    Dim midPath As String, filePath As String, totalMatch As Range, midMatch As Range
+    Dim taskList As Collection, codeItem As Variant, rowInSrc As Range
+    Dim destRow As Long, doneRow As Long, lastMidRow As Long
+    Dim key As Variant, engKey As Variant
+    Dim 編碼欄位號 As Long
+
+    Set wsSrc = ThisWorkbook.Sheets("待分派")
+    Set wsTotal = ThisWorkbook.Sheets("總資料")
+    Set dictSrc = GetHeaderDict(wsSrc, 2)
+    Set dictTotal = GetHeaderDict(wsTotal, 1)
+    Set taskMap = CreateObject("Scripting.Dictionary")
+    Set skippedEngineers = CreateObject("Scripting.Dictionary")
+
+    ' 建立「已分派」工作表（若不存在）
+    On Error Resume Next
+    Set wsDone = ThisWorkbook.Sheets("已分派")
+    If wsDone Is Nothing Then
+        Set wsDone = ThisWorkbook.Sheets.Add(After:=wsSrc)
+        wsDone.Name = "已分派"
+        wsSrc.Rows("1:2").Copy Destination:=wsDone.Rows("1")
+    End If
+    On Error GoTo 0
+
+    ' 開啟中繼檔案
+    midPath = ThisWorkbook.Path & "\中繼檔.xlsx"
+    If IsFileLocked(midPath) Then
+        MsgBox "中繼檔案已開啟，請關閉後再執行", vbCritical
+        Exit Sub
+    End If
+    Set wbMid = Workbooks.Open(midPath)
+    Set midWS = wbMid.Sheets("中繼資料")
+    Set dictMid = GetHeaderDict(midWS, 1)
+    midWS.Unprotect Password:="123456"
+
+    ' 以工程師為鍵、任務編碼為值，分組
+    lastRow = wsSrc.Cells(wsSrc.Rows.Count, 1).End(xlUp).Row
+    For i = 3 To lastRow
+        engName = Trim(wsSrc.Cells(i, dictSrc("設備工程師")).Value)
+        taskCode = Trim(wsSrc.Cells(i, dictSrc("編碼")).Value)
+        If engName <> "" And taskCode <> "" Then
+            If Not taskMap.exists(engName) Then Set taskMap(engName) = New Collection
+            taskMap(engName).Add taskCode
+        End If
+    Next i
+
+    ' 處理每位工程師
+    For Each engKey In taskMap.Keys
+        filePath = ThisWorkbook.Path & "\" & CStr(engKey) & "_委託任務.xlsm"
+        If Not fso.FileExists(filePath) Or IsFileLocked(filePath) Then
+            skippedEngineers(engKey) = True
+            GoTo SkipEngineer
+        End If
+
+        Set wbEng = GetOrOpenWorkbook(CStr(engKey), filePath)
+        Set dictEng = Nothing
+        On Error Resume Next: Set dictEng = GetHeaderDict(wbEng.Sheets("執行中"), 2): On Error GoTo 0
+        If dictEng Is Nothing Or Not dictEng.exists("編碼") Then
+            skippedEngineers(engKey) = True
+            GoTo SkipEngineer
+        End If
+        編碼欄位號 = dictEng("編碼")
+
+        Set taskList = taskMap(engKey)
+        For Each codeItem In taskList
+            taskCode = Trim(codeItem)
+
+            Set totalMatch = FindByCode1(wsTotal, "A", taskCode)
+            Set midMatch = FindByCode1(midWS, "A", taskCode)
+            Set rowInSrc = FindByCode1(wsSrc, "A", taskCode)
+
+            If taskCode = "" Or totalMatch Is Nothing Or rowInSrc Is Nothing Or Not midMatch Is Nothing Then
+                GoTo NextTask
+            End If
+
+            With wbEng.Sheets("執行中")
+                destRow = Application.Max(3, .Cells(.Rows.Count, 編碼欄位號).End(xlUp).Row + 1)
+                For Each key In dictTotal.Keys
+                    If dictEng.exists(key) Then
+                        .Cells(destRow, dictEng(key)).Value = wsTotal.Cells(totalMatch.Row, dictTotal(key)).Value
+                    End If
+                Next key
+            End With
+
+            ' 寫入中繼檔
+            lastMidRow = midWS.Cells(midWS.Rows.Count, dictMid("編碼")).End(xlUp).Row
+            midWS.Cells(lastMidRow + 1, dictMid("編碼")).Value = taskCode
+            midWS.Cells(lastMidRow + 1, dictMid("設備工程師")).Value = engKey
+            If dictMid.exists("上傳時間") Then
+                midWS.Cells(lastMidRow + 1, dictMid("上傳時間")).Value = Now
+            End If
+
+            ' 更新總資料
+            wsTotal.Cells(totalMatch.Row, dictTotal("設備工程師")).Value = engKey
+
+            ' 搬移至已分派 + 刪除原始資料
+            doneRow = wsDone.Cells(wsDone.Rows.Count, 1).End(xlUp).Row + 1
+            rowInSrc.EntireRow.Copy wsDone.Rows(doneRow)
+            rowInSrc.EntireRow.Delete
+
+NextTask:
+        Next codeItem
+
+SkipEngineer:
+    Next engKey
+
+    ' 關閉工程師檔案
+    For Each engKey In taskMap.Keys
+        If Not skippedEngineers.exists(engKey) Then
+            Workbooks(CStr(engKey) & "_委託任務.xlsm").Close SaveChanges:=True
+        End If
+    Next
+
+    midWS.Protect Password:="123456"
+    wbMid.Close SaveChanges:=True
+
+    If skippedEngineers.Count > 0 Then
+        Dim msg As String
+        For Each key In skippedEngineers.Keys
+            msg = msg & key & "、"
+        Next
+        MsgBox "以下工程師的檔案已開啟或錯誤，任務未匯出：" & Left(msg, Len(msg) - 1), vbExclamation
+    Else
+        MsgBox "所有任務已成功匯出至工程師與中繼檔案", vbInformation
+    End If
+End Sub
