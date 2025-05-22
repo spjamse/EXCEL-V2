@@ -1,0 +1,101 @@
+Function 取得合併值(cell As Range) As Variant
+    If cell.MergeCells Then
+        取得合併值 = cell.MergeArea.Cells(1, 1).Value
+    Else
+        取得合併值 = cell.Value
+    End If
+End Function
+
+Sub 匯入資料_V2()
+    Dim input_data As Worksheet
+    Dim output_data_1 As Worksheet
+    Dim Parameter As Worksheet
+    Dim 有無預算 As Integer
+    Dim NextRow As Long
+    Dim colMap As Object
+    Dim headerName As String
+    Dim col As Long
+    Dim 同委託人 As Boolean
+
+    Set input_data = ThisWorkbook.Sheets("輸入區")
+    Set Parameter = ThisWorkbook.Sheets("參數列表")
+    有無預算 = Parameter.Range("E10").Value
+
+    ' 防呆檢查
+    If Trim(input_data.Range("B3").Value) = "" Or Trim(input_data.Range("F4").Value) = "" Then
+        MsgBox "請先填寫必要欄位：B3（產品）與 F4（需求日）", vbExclamation
+        Exit Sub
+    End If
+
+    ' 決定輸出工作表
+    If 有無預算 = 1 Then
+        Set output_data_1 = ThisWorkbook.Sheets("有預算列表")
+    ElseIf 有無預算 = 2 Then
+        Set output_data_1 = ThisWorkbook.Sheets("待估預算列表")
+    Else
+        MsgBox "請選擇有預算或待估預算！", vbExclamation
+        Exit Sub
+    End If
+
+    ' 找下一個可寫入列
+    NextRow = output_data_1.Cells(output_data_1.Rows.Count, 2).End(xlUp).row + 1
+    If NextRow < 2 Then NextRow = 2
+
+    ' 建立輸入欄位對應字典
+    Set colMap = CreateObject("Scripting.Dictionary")
+    colMap.Add "產品名稱", "B3"
+    colMap.Add "需求日", "F4"
+    colMap.Add "出貨日", "F5"
+    colMap.Add "委託人", "B2"
+    colMap.Add "委託單位", "D2"
+    colMap.Add "開發指令碼", "D5"
+    colMap.Add "設備類型", "B4"
+    colMap.Add "種類", "D4"
+    colMap.Add "使用單位", "B6"
+    colMap.Add "技術員", "D6"
+    colMap.Add "產能", "F6"
+    colMap.Add "設備目的", "B7"
+    colMap.Add "共用產品", "B8"
+    colMap.Add "產品階段", "B9"
+    colMap.Add "油品使用", "D9"
+    colMap.Add "預計可領料時間", "F9"
+    colMap.Add "料號", "B10"
+    colMap.Add "產品注意事項", "B11"
+    colMap.Add "備註", "B12"
+    colMap.Add "預算", "B13"
+    colMap.Add "接洽日期", "D1"
+    colMap.Add "編碼", "B3" ' 雖然實際不使用，但用來識別欄位
+
+    ' 寫入資料（根據輸出表抬頭）
+    With output_data_1
+        For col = 1 To .Cells(2, Columns.Count).End(xlToLeft).Column
+            headerName = Trim(.Cells(2, col).Value)
+            If colMap.exists(headerName) Then
+                If headerName = "預算" Then
+                    If 有無預算 = 1 Then
+                        .Cells(NextRow, col).Value = 取得合併值(input_data.Range("H1"))
+                    ElseIf 有無預算 = 2 Then
+                        .Cells(NextRow, col).Value = "待估"
+                    End If
+
+                ElseIf headerName = "產品工程師" Then
+                    If 同委託人 = True Then
+                        .Cells(NextRow, col).Value = 取得合併值(input_data.Range("B2"))
+                    Else
+                        .Cells(NextRow, col).Value = 取得合併值(input_data.Range("D3"))
+                    End If
+
+                ElseIf headerName = "編碼" Then
+                    Dim 編碼時間 As String
+                    編碼時間 = Format(Now, "yyyymmddhhmmss")
+                    .Cells(NextRow, col).Value = 取得合併值(input_data.Range("B3")) & "-" & 編碼時間
+
+                Else
+                    .Cells(NextRow, col).Value = 取得合併值(input_data.Range(colMap(headerName)))
+                End If
+            End If
+        Next col
+    End With
+
+    MsgBox "已成功匯入資料", vbInformation
+End Sub
