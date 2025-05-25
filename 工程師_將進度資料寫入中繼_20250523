@@ -1,4 +1,4 @@
-FFunction GetHeaderDict(ws As Worksheet, headerRow As Long) As Object
+Function GetHeaderDict(ws As Worksheet, headerRow As Long) As Object
     Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
     Dim i As Long, colCount As Long
     colCount = ws.Cells(headerRow, Columns.Count).End(xlToLeft).Column
@@ -80,4 +80,5 @@ Sub 將進度資料寫入中繼()
 
     MsgBox "中繼資料已更新、儲存並關閉完成。", vbInformation
 End Sub
+
 
