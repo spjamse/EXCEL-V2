@@ -47,6 +47,16 @@ Function 找對應編碼(ws As Worksheet, keyColName As String, valColName As St
             Exit Function
         End If
     Next row
+    If keyVal <> "" Then
+        keyVal = "其他"
+             For row = 2 To lastRow
+                If Trim(ws.Cells(row, keyCol).Value) = keyVal Then
+                    找對應編碼 = Trim(ws.Cells(row, valCol).Value)
+                    Exit Function
+                End If
+            Next row
+        End If
+        
 End Function
 Function 產生內部編碼(wsData As Worksheet, row As Long, ws參數 As Worksheet, 編碼版本 As String) As String
     Dim dictHeader As Object: Set dictHeader = GetHeaderDict(wsData, 2)
