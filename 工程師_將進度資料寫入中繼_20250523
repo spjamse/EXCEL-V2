@@ -80,3 +80,4 @@ Sub 將進度資料寫入中繼()
 
     MsgBox "中繼資料已更新、儲存並關閉完成。", vbInformation
 End Sub
+
