@@ -1,4 +1,4 @@
-Function GetHeaderDict(ws As Worksheet, headerRow As Long) As Object
+FFunction GetHeaderDict(ws As Worksheet, headerRow As Long) As Object
     Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
     Dim i As Long, colCount As Long
     colCount = ws.Cells(headerRow, Columns.Count).End(xlToLeft).Column
