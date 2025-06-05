@@ -1,0 +1,173 @@
+Sub 收集資料到待整理_V3_1()
+    Dim folderPath As String, fileName As String
+    Dim wb As Workbook, ws As Worksheet, destWs As Worksheet
+    Dim destRow As Long
+    Dim segments As Collection, segmentInfo As Variant
+    Dim rowStart As Long, rowEnd As Long, colStart As Long, colEnd As Long
+    Dim sh As Worksheet
+
+    With Application.FileDialog(msoFileDialogFolderPicker)
+        .Title = "選擇含有 Excel 檔案的資料夾"
+        If .Show <> -1 Then Exit Sub
+        folderPath = .SelectedItems(1) & "\"
+    End With
+
+    Set destWs = ThisWorkbook.Sheets("待整理")
+    destWs.Rows("3:" & destWs.Rows.Count).ClearContents  ' 保留第1與第2列
+    destRow = 3  ' 從第3列開始匯入資料
+
+    fileName = Dir(folderPath & "*.xlsx")
+
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    Do While fileName <> ""
+        Set wb = Workbooks.Open(folderPath & fileName, ReadOnly:=True)
+
+        For Each sh In wb.Sheets
+            If Is市資料表(sh.Name, fileName) Then
+                Set ws = sh
+                Set segments = FindAllTableSegments(ws)
+
+                For Each segmentInfo In segments
+                    If IsArray(segmentInfo) Then
+                        rowStart = segmentInfo(0)
+                        rowEnd = segmentInfo(1)
+                        colStart = segmentInfo(2)
+                        colEnd = segmentInfo(3)
+
+                        If rowEnd >= rowStart Then
+                            CopySegmentData ws, rowStart, rowEnd, colStart, colEnd, destWs, destRow, fileName, ws.Name
+                        End If
+                    End If
+                Next segmentInfo
+            End If
+        Next sh
+
+        wb.Close SaveChanges:=False
+        fileName = Dir
+    Loop
+
+    Call 清除空白與備註列(destWs, 1, destRow - 1)
+    Call 刪除資料內表頭列(destWs, 1, destRow - 1)
+
+    Application.ScreenUpdating = True
+    MsgBox "資料擷取完成！", vbInformation
+End Sub
+
+Function Is市資料表(sheetName As String, fileName As String) As Boolean
+    Dim code As String
+    code = Replace(fileName, ".xlsx", "")
+    If InStr(code, "-") > 0 Then code = Left(code, InStr(code, "-") - 1)
+
+    Select Case sheetName
+        Case code & "市", code & "市購", code & "市購件"
+            Is市資料表 = True
+        Case Else
+            Is市資料表 = False
+    End Select
+End Function
+
+Function FindAllTableSegments(ws As Worksheet) As Collection
+    Dim lastRow As Long, colCount As Long
+    Dim i As Long, j As Long
+    Dim startCol As Long, endCol As Long, dataEnd As Long
+    Dim headerRow As Long
+    Dim segments As New Collection
+
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+
+    For i = 1 To lastRow
+        colCount = ws.Cells(i, ws.Columns.Count).End(xlToLeft).Column
+        For j = 1 To colCount
+            If Trim(ws.Cells(i, j).Value) = "序號" Then
+                headerRow = i
+                startCol = j
+                endCol = startCol
+
+                Do While ws.Cells(headerRow, endCol).Value <> "規格" And endCol <= colCount
+                    endCol = endCol + 1
+                Loop
+
+                If ws.Cells(headerRow, endCol).Value = "規格" Then
+                    dataEnd = Find備註前Row(ws, headerRow + 1, startCol)
+                    If dataEnd > headerRow Then
+                        segments.Add Array(headerRow + 1, dataEnd, startCol, endCol)
+                    End If
+                End If
+            End If
+        Next j
+    Next i
+
+    Set FindAllTableSegments = segments
+End Function
+
+Function Find備註前Row(ws As Worksheet, startRow As Long, col序號 As Long) As Long
+    Dim lastDataRow As Long
+    Dim i As Long
+    lastDataRow = ws.Cells(ws.Rows.Count, col序號).End(xlUp).Row
+
+    For i = lastDataRow To startRow Step -1
+        If InStr(ws.Cells(i, col序號).Value, "備註") > 0 Then
+            Find備註前Row = i - 1
+            Exit Function
+        End If
+    Next i
+
+    Find備註前Row = lastDataRow
+End Function
+
+Sub CopySegmentData(wsSrc As Worksheet, rowStart As Long, rowEnd As Long, colStart As Long, colEnd As Long, wsDest As Worksheet, ByRef destRow As Long, sourceFile As String, sheetName As String)
+    Dim r As Long, val As Variant, key As Variant
+    Dim dictSrc As Object, dictDest As Object
+    Dim headerRowSrc As Long: headerRowSrc = rowStart - 1
+
+    Set dictSrc = GetHeaderDict(wsSrc, headerRowSrc)
+    Set dictDest = GetHeaderDict(wsDest, 2)
+
+    For r = rowStart To rowEnd
+        For Each key In dictSrc.Keys
+            If dictDest.exists(key) Then
+                val = wsSrc.Cells(r, dictSrc(key)).Value
+                wsDest.Cells(destRow, dictDest(key)).Value = val
+            End If
+        Next key
+        ' 檔案名稱與工作表名稱對應欄位寫入（若已於表頭中）
+        If dictDest.exists("檔案名稱") Then wsDest.Cells(destRow, dictDest("檔案名稱")).Value = sourceFile
+        If dictDest.exists("工作表名稱") Then wsDest.Cells(destRow, dictDest("工作表名稱")).Value = sheetName
+        destRow = destRow + 1
+    Next r
+End Sub
+
+Function GetHeaderDict(ws As Worksheet, headerRow As Long) As Object
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    Dim col As Long, lastCol As Long
+    lastCol = ws.Cells(headerRow, ws.Columns.Count).End(xlToLeft).Column
+    For col = 1 To lastCol
+        If Trim(ws.Cells(headerRow, col).Value) <> "" Then
+            dict(ws.Cells(headerRow, col).Value) = col
+        End If
+    Next col
+    Set GetHeaderDict = dict
+End Function
+
+Sub 清除空白與備註列(ws As Worksheet, col序號 As Long, lastRow As Long)
+    Dim i As Long
+    For i = lastRow To 3 Step -1
+        With ws.Cells(i, col序號)
+            If Trim(.Value) = "" Or InStr(.Value, "備註") > 0 Then
+                ws.Rows(i).Delete
+            End If
+        End With
+    Next i
+End Sub
+
+Sub 刪除資料內表頭列(ws As Worksheet, col序號 As Long, lastRow As Long)
+    Dim i As Long
+    For i = lastRow To 3 Step -1
+        If Trim(ws.Cells(i, col序號).Value) = "序號" Then
+            ws.Rows(i).Delete
+        End If
+    Next i
+End Sub
+
